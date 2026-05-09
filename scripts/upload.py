@@ -27,7 +27,6 @@ from pathlib import Path
 from io import BytesIO
 
 import boto3
-boto3.set_stream_logger("botocore", level="DEBUG")
 import click
 from botocore.config import Config
 from dotenv import load_dotenv
