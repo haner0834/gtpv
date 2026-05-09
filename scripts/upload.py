@@ -25,6 +25,8 @@ import uuid
 import hashlib
 from pathlib import Path
 from io import BytesIO
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 import boto3
 import click
@@ -148,6 +150,12 @@ def get_content_type(path: Path) -> str:
 
 @click.command()
 @click.option(
+    "--workers",
+    default=4,
+    show_default=True,
+    help="並行上傳的 thread 數量",
+)
+@click.option(
     "--folder",
     "local_folder",
     required=True,
@@ -172,7 +180,7 @@ def get_content_type(path: Path) -> str:
     default=False,
     help="僅列出將要上傳的檔案，不實際上傳",
 )
-def main(local_folder: str, folder_name: str, force: bool, dry_run: bool):
+def main(workers: int, local_folder: str, folder_name: str, force: bool, dry_run: bool):
     """GTPV 相片上傳工具"""
 
     bucket = os.environ.get("R2_BUCKET_NAME", "gtpv-images")
@@ -195,58 +203,85 @@ def main(local_folder: str, folder_name: str, force: bool, dry_run: bool):
 
     client = None if dry_run else get_r2_client()
 
-    uploaded = 0
-    skipped = 0
-    errors = 0
-
+    lock = threading.Lock()
     used_ids: set[str] = set()
-    for idx, file_path in enumerate(files, 1):
+
+    def process_file(args):
+        idx, file_path = args
         image_id = image_id_from_file(file_path, used_ids)
-        used_ids.add(image_id)
+        with lock:
+            used_ids.add(image_id)
         prefix = f"{folder_name}/{image_id}"
 
-        click.echo(f"\n[{idx}/{len(files)}] {file_path.name} → {image_id}")
+        results = {"uploaded": 0, "skipped": 0, "errors": 0}
+
+        with lock:
+            click.echo(f"\n[{idx}/{len(files)}] {file_path.name} → {image_id}")
 
         try:
             with Image.open(file_path) as img:
-                img.load()  # force decode before processing
+                img.load()
 
-            # ── Full image ──────────────────────────────────────────────────
+            # Full image
             full_key = f"{prefix}/full"
             with open(file_path, "rb") as f:
                 full_data = f.read()
 
             if dry_run:
-                click.echo(f"  [dry] full     → {full_key}")
+                with lock:
+                    click.echo(f"  [dry] full     → {full_key}")
             elif force or not key_exists(client, bucket, full_key):
                 upload_bytes(client, bucket, full_key, full_data, get_content_type(file_path))
-                click.echo(f"  ✅ full     ({len(full_data) // 1024} KB)")
-                uploaded += 1
+                with lock:
+                    click.echo(f"  ✅ full     ({len(full_data) // 1024} KB)")
+                results["uploaded"] += 1
             else:
-                click.echo(f"  ⏭️  full     (已存在，略過)")
-                skipped += 1
+                with lock:
+                    click.echo(f"  ⏭️  full     (已存在，略過)")
+                results["skipped"] += 1
 
-            # ── Thumbnails ──────────────────────────────────────────────────
+        # Thumbnails
             with Image.open(file_path) as img:
                 for size in THUMBNAIL_SIZES:
                     thumb_key = f"{prefix}/thumbnail{size}"
                     if dry_run:
-                        click.echo(f"  [dry] thumb{size:<3}  → {thumb_key}")
+                        with lock:
+                            click.echo(f"  [dry] thumb{size:<3}  → {thumb_key}")
                         continue
 
                     if not force and key_exists(client, bucket, thumb_key):
-                        click.echo(f"  ⏭️  thumb{size:<3}  (已存在，略過)")
-                        skipped += 1
+                        with lock:
+                            click.echo(f"  ⏭️  thumb{size:<3}  (已存在，略過)")
+                        results["skipped"] += 1
                         continue
 
                     thumb_data = make_thumbnail(img, size)
                     upload_bytes(client, bucket, thumb_key, thumb_data, "image/jpeg")
-                    click.echo(f"  ✅ thumb{size:<3}  ({len(thumb_data) // 1024} KB)")
-                    uploaded += 1
+                    with lock:
+                        click.echo(f"  ✅ thumb{size:<3}  ({len(thumb_data) // 1024} KB)")
+                    results["uploaded"] += 1
 
         except Exception as e:
-            click.echo(f"  ❌ 錯誤: {e}", err=True)
-            errors += 1
+            with lock:
+                click.echo(f"  ❌ 錯誤: {e}", err=True)
+            results["errors"] += 1
+
+        return results
+    
+    uploaded = 0
+    skipped = 0
+    errors = 0
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(process_file, (idx, f)): f
+            for idx, f in enumerate(files, 1)
+        }
+        for future in as_completed(futures):
+            r = future.result()
+            uploaded += r["uploaded"]
+            skipped += r["skipped"]
+            errors += r["errors"]
 
     click.echo(f"\n{'='*40}")
     click.echo(f"✅ 上傳: {uploaded}  ⏭️ 略過: {skipped}  ❌ 錯誤: {errors}")
