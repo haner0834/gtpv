@@ -1,0 +1,13 @@
+name = "gtpv-worker"
+main = "index.ts"
+compatibility_date = "2024-09-23"
+
+# 不需要 nodejs_compat，我們只用 Web Crypto + R2，全是 CF 內建
+
+[[r2_buckets]]
+binding = "R2_BUCKET"
+bucket_name = "gtpv-images"   # 改成你實際的 R2 bucket 名稱
+
+# Secrets — 用 CLI 設定：
+#   npx wrangler secret put SALT
+#   npx wrangler secret put FOLDER_CODES
