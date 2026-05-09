@@ -47,7 +47,7 @@ function ImageCard({ folder, imageId, onClick }: ImageCardProps) {
 
   return (
     <div
-      className="break-inside-avoid mb-1.5 cursor-pointer group relative overflow-hidden rounded-md bg-white/5"
+      className="break-inside-avoid my-1.5 cursor-pointer group relative overflow-hidden rounded-md bg-white/5"
       onClick={onClick}
     >
       {!loaded && !error && (
