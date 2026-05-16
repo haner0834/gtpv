@@ -114,7 +114,7 @@ export default {
         return errResponse(request, "Server config error", 500);
       }
 
-      // No found passcode = public folder
+      // No passcode = public folder
       if (codes[folder] !== undefined && passcode !== codes[folder]) {
         return errResponse(request, "Invalid passcode", 401);
       }
