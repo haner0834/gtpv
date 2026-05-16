@@ -45,18 +45,29 @@ function jsonResponse(request: Request, data: unknown, status = 200): Response {
   });
 }
 
-function errResponse(request: Request, message: string, status: number): Response {
+function errResponse(
+  request: Request,
+  message: string,
+  status: number
+): Response {
   return jsonResponse(request, { error: message }, status);
 }
 
 async function sha256hex(input: string): Promise<string> {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+  const buf = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(input)
+  );
   return Array.from(new Uint8Array(buf))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 }
 
-async function deriveToken(folder: string, passcode: string, salt: string): Promise<string> {
+async function deriveToken(
+  folder: string,
+  passcode: string,
+  salt: string
+): Promise<string> {
   return sha256hex(`${folder}:${passcode}:${salt}`);
 }
 
@@ -65,7 +76,10 @@ async function deriveToken(folder: string, passcode: string, salt: string): Prom
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: getCorsHeaders(request) });
+      return new Response(null, {
+        status: 204,
+        headers: getCorsHeaders(request),
+      });
     }
 
     const url = new URL(request.url);
@@ -74,7 +88,9 @@ export default {
     // GET /api/folders
     if (path === "/api/folders" && request.method === "GET") {
       const listed = await env.R2_BUCKET.list({ delimiter: "/" });
-      const folders = (listed.delimitedPrefixes ?? []).map((p) => p.replace(/\/$/, ""));
+      const folders = (listed.delimitedPrefixes ?? []).map((p: any) =>
+        p.replace(/\/$/, "")
+      );
       return jsonResponse(request, { folders });
     }
 
@@ -88,7 +104,8 @@ export default {
       }
 
       const { folder, passcode } = body;
-      if (!folder || !passcode) return errResponse(request, "Missing fields", 400);
+      if (!folder || !passcode)
+        return errResponse(request, "Missing fields", 400);
 
       let codes: Record<string, string>;
       try {
@@ -97,7 +114,8 @@ export default {
         return errResponse(request, "Server config error", 500);
       }
 
-      if (!codes[folder] || passcode !== codes[folder]) {
+      // No found passcode = public folder
+      if (codes[folder] !== undefined && passcode !== codes[folder]) {
         return errResponse(request, "Invalid passcode", 401);
       }
 
@@ -118,14 +136,17 @@ export default {
         return errResponse(request, "Server config error", 500);
       }
 
-      if (!codes[folder]) return errResponse(request, "Folder not found", 404);
+      const isPublic = !(folder in codes);
 
-      const expected = await deriveToken(folder, codes[folder], env.SALT);
-      if (token !== expected) return errResponse(request, "Unauthorized", 401);
+      if (isPublic) {
+        const expected = await deriveToken(folder, codes[folder], env.SALT);
+        if (token !== expected)
+          return errResponse(request, "Unauthorized", 401);
+      }
 
       const prefix = `${folder}/`;
       const listed = await env.R2_BUCKET.list({ prefix, delimiter: "/" });
-      const images = (listed.delimitedPrefixes ?? []).map((p) =>
+      const images = (listed.delimitedPrefixes ?? []).map((p: any) =>
         p.replace(prefix, "").replace(/\/$/, "")
       );
       return jsonResponse(request, { images });
