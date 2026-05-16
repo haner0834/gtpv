@@ -138,7 +138,7 @@ export default {
 
       const isPublic = !(folder in codes);
 
-      if (isPublic) {
+      if (!isPublic) {
         const expected = await deriveToken(folder, codes[folder], env.SALT);
         if (token !== expected)
           return errResponse(request, "Unauthorized", 401);
