@@ -85,13 +85,27 @@ export function GalleryPage() {
 
   const handleFolderChange = async (newFolder: string) => {
     if (newFolder === folder) return;
+
     const existingToken = getToken(newFolder);
     if (existingToken) {
-      // Try with existing token — navigate; gallery page will validate
       navigate(`/${newFolder}?token=${existingToken}`);
-    } else {
-      setPendingFolder(newFolder);
-      setAuthState("switch_folder");
+      return;
+    }
+
+    // 先試試看是否為 public folder
+    try {
+      await apiList(newFolder, "public");
+      // 成功 = public，直接跳過去
+      navigate(`/${newFolder}`);
+    } catch (e) {
+      if ((e as Error).message === "UNAUTHORIZED") {
+        // private folder，需要密碼
+        setPendingFolder(newFolder);
+        setAuthState("switch_folder");
+      } else {
+        // 其他錯誤（404 等），也先跳過去讓 GalleryPage 自己處理
+        navigate(`/${newFolder}`);
+      }
     }
   };
 
