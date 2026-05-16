@@ -8,9 +8,9 @@ import { ImageGrid } from "../components/ImageGrid";
 import { FolderSelector } from "../components/FolderSelector";
 
 type AuthState =
-  | "loading"      // checking existing token
+  | "loading" // checking existing token
   | "needs_passcode" // no valid token
-  | "authenticated"  // token valid
+  | "authenticated" // token valid
   | "switch_folder"; // user switching folder, need new passcode
 
 export function GalleryPage() {
@@ -34,7 +34,15 @@ export function GalleryPage() {
     const token = urlToken ?? storeToken ?? null;
 
     if (!token) {
-      setAuthState("needs_passcode");
+      // 先嘗試用空字串向 worker 驗證，worker 會告訴我們是否為 public folder
+      apiList(folder!, "public")
+        .then(() => {
+          setActiveToken("public");
+          setAuthState("authenticated");
+        })
+        .catch(() => {
+          setAuthState("needs_passcode");
+        });
       return;
     }
     setActiveToken(token);
